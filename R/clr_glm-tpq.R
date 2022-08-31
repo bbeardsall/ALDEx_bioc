@@ -36,7 +36,7 @@
 #' mm <- model.matrix(~ A + B, covariates)
 #' x <- aldex.clr(selex, mm, mc.samples=1, denom="all")
 #' glm.test <- aldex.glm(x)
-aldex.glm <- function(clr, verbose=FALSE, ...){
+aldex.glm <- function(clr, verbose=FALSE, cores = 1, ...){
 
   # Use clr conditions slot instead of input
   conditions <- clr@conds
@@ -94,12 +94,15 @@ aldex.glm <- function(clr, verbose=FALSE, ...){
   mc <- ALDEx2::getMonteCarloInstances(clr)
   k <- ALDEx2::numMCInstances(clr)
   r <- 0
-  for(i in 1:k){
 
-    if(verbose[1] == TRUE ){ numTicks <- progress(i, k, numTicks) }
+  apply_mc <- function(i, mc, conditions, k, ...){
     mci_lr <- t(sapply(mc, function(x) x[, i]))
-    r <- r + lr2glm(mci_lr, conditions, ...)
+    return(lr2glm(mci_lr, conditions, ...))
   }
+
+  r_list <- parallel::mclapply(1:k, apply_mc, mc.cores=cores, mc=mc, 
+  conditions = conditions, k = k, ...)
+  r <- Reduce("+", r_list)
 
   r / k # return expected
 }
