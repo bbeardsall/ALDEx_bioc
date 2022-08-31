@@ -81,7 +81,7 @@ aldex.glm <- function(clr, verbose=FALSE, cores = 1, ...){
     df.bh <- df[,pvals]
     colnames(df.bh) <- paste0(colnames(df.bh), ".BH")
     for(j in 1:ncol(df.bh)){
-      df.bh[,j] <- p.adjust(df.bh[,j])
+      df.bh[,j] <- p.adjust(df.bh[,j], method = "BH")
     }
 
     # Merge results with FDR
