@@ -6,6 +6,7 @@
 #'
 #' @param clr An \code{ALDEx2} object. The output of \code{aldex.clr}.
 #' @param fdr.method A string ("BH" or "holm") denoting which method to use to adjust p-values. Default is "holm"
+#' @param useMC Toggles whether to use multi-core.
 
 #' @inheritParams aldex
 #' @param ... Arguments passed to \code{glm}.
@@ -40,10 +41,22 @@
 #' glm.eff <- aldex.glm.effect(x)
 #' aldex.glm.plot(glm.test, eff=glm.eff, contrast='B', type='MW', post.hoc='holm')
 #'
-aldex.glm <- function(clr, verbose=FALSE, fdr.method = "holm", ...){
+aldex.glm <- function(clr, verbose=FALSE, fdr.method = "holm", useMC=FALSE, ...){
   
   if(!(fdr.method %in% c("holm", "BH", "fdr"))){
     stop("Method to adjust p-values not supported.")
+  }
+
+  # make sure that the multicore package is in scope and return if available
+  is.multicore = FALSE
+
+  if ("BiocParallel" %in% rownames(installed.packages()) & useMC){
+    message("multicore environment is OK -- using the BiocParallel package")
+    #require(BiocParallel)
+    is.multicore = TRUE
+  }
+  else {
+    message("operating in serial mode")
   }
 
   # Use clr conditions slot instead of input
@@ -59,16 +72,30 @@ aldex.glm <- function(clr, verbose=FALSE, fdr.method = "holm", ...){
   r.p.upper <- 0
   r.bh.lower <- 0
   r.bh.upper <- 0
-  for(i in 1:k){
+  if(is.multicore == TRUE){
+    # Execute in parallel
+    parallelResults <- bplapply(1:k, processInstance, 
+    mc=mc, conditions=conditions, fdr.method=fdr.method)
 
-    if(verbose[1] == TRUE ){ numTicks <- progress(i, k, numTicks) }
-    mci_lr <- t(sapply(mc, function(x) x[, i]))
-    mod <- lr2glm(mci_lr, conditions, fdr.method = fdr.method, ...)
-    r <- r + mod$df
-    r.p.lower <- r.p.lower + mod$df.p.lower
-    r.p.upper <- r.p.upper + mod$df.p.greater
-    r.bh.lower <- r.bh.lower + mod$df.bh.lower
-    r.bh.upper <- r.bh.upper + mod$df.bh.greater
+    # Aggregate results
+    for(result in parallelResults) {
+      r <- r + result$df
+      r.p.lower <- r.p.lower + result$df.p.lower
+      r.p.upper <- r.p.upper + result$df.p.greater
+      r.bh.lower <- r.bh.lower + result$df.bh.lower
+      r.bh.upper <- r.bh.upper + result$df.bh.greater
+    }
+  } else {
+    for(i in 1:k){
+      if(verbose[1] == TRUE ){ numTicks <- progress(i, k, numTicks) }
+      mci_lr <- t(sapply(mc, function(x) x[, i]))
+      mod <- lr2glm(mci_lr, conditions, fdr.method = fdr.method, ...)
+      r <- r + mod$df
+      r.p.lower <- r.p.lower + mod$df.p.lower
+      r.p.upper <- r.p.upper + mod$df.p.greater
+      r.bh.lower <- r.bh.lower + mod$df.bh.lower
+      r.bh.upper <- r.bh.upper + mod$df.bh.greater
+    }
   }
   # simplify names for plotting
   colnames(r) <- gsub("\\(Intercept)", 'Intercept:', colnames(r))
@@ -101,6 +128,19 @@ aldex.glm <- function(clr, verbose=FALSE, fdr.method = "holm", ...){
   
   
   cbind(r/k, r.p, r.p.adj) # return expected
+}
+
+# Define the function to be applied in parallel
+processInstance <- function(i, mc, conditions, fdr.method, ...) {
+  mci_lr <- t(sapply(mc, function(x) x[, i]))
+  mod <- lr2glm(mci_lr, conditions, fdr.method = fdr.method, ...)
+  list(
+    df = mod$df,
+    df.p.lower = mod$df.p.lower,
+    df.p.greater = mod$df.p.greater,
+    df.bh.lower = mod$df.bh.lower,
+    df.bh.greater = mod$df.bh.greater
+  )
 }
 
 # declaring this once provides a 40% speedup
